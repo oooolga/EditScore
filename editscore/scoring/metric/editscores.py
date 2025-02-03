@@ -1,26 +1,23 @@
-from .utils import (
-    mllm_output_to_dict
+from editscore.scoring.metric.utils import (
+    mllm_output_to_dict, download_image
 )
 import math
-from editscore.scoring.metric import parsed_rpompts as vp
+from editscore.scoring.prompt_tools import PromptList, PromptFSSample, MetricPrompt, START_DELIMITER, END_DELIMITER
 
 class EditScore:
-    def __init__(self, backbone="gpt4o", task="t2i", key_path=None) -> None:
-        self.task = task
+    def __init__(self, backbone="gpt4o", baseline="ip2p", key_path=None, delimiter=False) -> None:
         self.backbone_name = backbone
-
-        if self.task not in ["t2i", "tie", "t2v"]:
-            raise ValueError("task must be either 't2i' or 'tie'")
+        self.baseline_name = baseline
 
         if self.backbone_name == "gpt4o":
-            from ..mllm_tools import GPT4o
-            self.model = GPT4o(key_path)
+            from editscore.mllm_tools.openai import GPT4o
+            self.mllm_model = GPT4o(key_path)
         elif self.backbone_name == "gpt4v":
-            from mllm_tools.openai import GPT4v
-            self.model = GPT4v(key_path)
+            from editscore.mllm_tools.openai import GPT4v
+            self.mllm_model = GPT4v(key_path)
         elif self.backbone_name == "gemini":
-            from mllm_tools.gemini import Gemini
-            self.model = Gemini()
+            from editscore.mllm_tools.openai import Gemini
+            self.mllm_model = Gemini()
         # elif self.backbone_name == "idefics2":
         #     from mllm_tools.idefics2_eval import Idefics2
         #     self.model = Idefics2()
@@ -32,77 +29,101 @@ class EditScore:
         #     self.model = MiniCPMV()
         else:
             raise NotImplementedError("backbone not supported")
-        self.context = vp._context_no_delimit
-        if self.task == "t2i":
-            self.SC_prompt = "\n".join([self.context, vp._prompts_0shot_one_image_gen_rule, vp._prompts_0shot_t2i_rule_SC])
-            self.PQ_prompt = "\n".join([self.context, vp._prompts_0shot_rule_PQ])
-        elif self.task == "tie":
-            self.SC_prompt = "\n".join([self.context, vp._prompts_0shot_two_image_edit_rule, vp._prompts_0shot_tie_rule_SC])
-            self.PQ_prompt = "\n".join([self.context, vp._prompts_0shot_rule_PQ])
-        elif self.task == "t2v":
-            self.SC_prompt = "\n".join([self.context, vp._prompts_0shot_one_video_gen_rule, vp._prompts_0shot_t2v_rule_SC])
-            self.PQ_prompt = "\n".join([self.context, vp._prompts_0shot_t2v_rule_PQ])
+
+        if self.baseline_name == "ip2p":
+            from editscore.baseline_models import InstructPix2Pix
+            self.baseline_model = InstructPix2Pix()
+        else:
+            raise NotImplementedError("baseline not supported")
+
+        from editscore.scoring.prompt_tools import MetricPrompt
+        self.metric_prompt = MetricPrompt(mllm_model=self.mllm_model, delimiter=delimiter)
         
 
-    def evaluate(self, image_prompts, text_prompt, extract_overall_score_only=False, extract_all_score=True, echo_output=False):
-        if not isinstance(image_prompts, list):
-            image_prompts = [image_prompts]
-        if self.backbone_name in ['gpt4o', 'gpt4v']:
-            self.model.use_encode = False if isinstance(image_prompts[0], str) else True
-            #print("Using encode:", self.model.use_encode)
-        if self.task == "t2i":
-            SC_prompt = self.SC_prompt.replace("<prompt>", text_prompt)
-        elif self.task == "tie":
-            SC_prompt = self.SC_prompt.replace("<instruction>", text_prompt)
-        elif self.task == "t2v":
-            SC_prompt = self.SC_prompt.replace("<prompt>", text_prompt)
-        SC_prompt_final = self.model.prepare_prompt(image_prompts, SC_prompt)
-        if self.task == "tie":
-            PQ_prompt_final = self.model.prepare_prompt(image_prompts[-1], self.PQ_prompt)
-        else:
-            PQ_prompt_final = self.model.prepare_prompt(image_prompts, self.PQ_prompt)
+    def evaluate(self,
+                 input_image,
+                 edit_instruction,
+                 ideal_edit,
+                 new_edit,
+                 fs_input_images=[],
+                 fs_edit_instructions=[],
+                 fs_ideal_edits=[],
+                 fs_new_edits=[],
+                 fs_suggested_scores=[],
+                 fs_reasonings=[],
+                 extract_overall_score_only=False, extract_all_score=True, echo_output=False):
+        
+        fs_baseline_edits = []
+        for fs_input_image, fs_edit_instruction in zip(fs_input_images, fs_edit_instructions):
+            fs_input_image = download_image(fs_input_image) if isinstance(fs_input_image, str) else fs_input_image
+            fs_baseline_edits.append(self.baseline_model.get_editted_image(fs_edit_instruction, fs_input_image))
+        
+        self.metric_prompt.add_fs_examples(input_images=fs_input_images,
+                                          edit_instructions=fs_edit_instructions,
+                                          ideal_edits=fs_ideal_edits,
+                                          new_edits=fs_new_edits,
+                                          baseline_edits=fs_baseline_edits,
+                                          suggested_scores=fs_suggested_scores,
+                                          reasonings=fs_reasonings)
+        
+        edit_image = download_image(input_image) if isinstance(input_image, str) else input_image
+        baseline_edit = self.baseline_model.get_editted_image(edit_instruction, edit_image)
+        self.metric_prompt.finalize(input_image=input_image,
+                                    edit_instruction=edit_instruction,
+                                    ideal_edit=ideal_edit,
+                                    new_edit=new_edit,
+                                    baseline_edit=baseline_edit)
+        prompt = self.mllm_model.prepare_prompt(self.metric_prompt)
+        result = self.mllm_model.get_parsed_output(prompt) 
+        results_dict = mllm_output_to_dict(result,
+                                           start_delimiter=START_DELIMITER if self.metric_prompt.delimiter else None,
+                                           end_delimiter=END_DELIMITER if self.metric_prompt.delimiter else None)
 
-        results_dict = {}
+        self.metric_prompt.reinitialize()
 
-        SC_dict = False
-        PQ_dict = False
-        tries = 0
-        max_tries = 1
-        while SC_dict is False or PQ_dict is False:
-            tries += 1
-            guess_if_cannot_parse = True if tries > max_tries else False
-            result_SC = self.model.get_parsed_output(SC_prompt_final)
-            result_PQ = self.model.get_parsed_output(PQ_prompt_final)
-            SC_dict = mllm_output_to_dict(result_SC, give_up_parsing=guess_if_cannot_parse)
-            PQ_dict = mllm_output_to_dict(result_PQ, give_up_parsing=guess_if_cannot_parse)
+    
+        # SC_dict = False
+        # PQ_dict = False
+        # tries = 0
+        # max_tries = 1
+        # while SC_dict is False or PQ_dict is False:
+        #     tries += 1
+        #     guess_if_cannot_parse = True if tries > max_tries else False
+        #     result_SC = self.model.get_parsed_output(SC_prompt_final)
+        #     result_PQ = self.model.get_parsed_output(PQ_prompt_final)
+        #     SC_dict = mllm_output_to_dict(result_SC, give_up_parsing=guess_if_cannot_parse)
+        #     PQ_dict = mllm_output_to_dict(result_PQ, give_up_parsing=guess_if_cannot_parse)
 
-        if SC_dict == "rate_limit_exceeded" or PQ_dict == "rate_limit_exceeded":
-            print("rate_limit_exceeded") 
-            raise ValueError("rate_limit_exceeded")
-        results_dict['SC'] = SC_dict
-        results_dict['PQ'] = PQ_dict
-        SC_score = min(results_dict['SC']['score'])
-        PQ_score = min(results_dict['PQ']['score'])
-        O_score = math.sqrt(SC_score * PQ_score)
-        results_dict['O'] = {'score': O_score}
+        # if SC_dict == "rate_limit_exceeded" or PQ_dict == "rate_limit_exceeded":
+        #     print("rate_limit_exceeded") 
+        #     raise ValueError("rate_limit_exceeded")
+        # results_dict['SC'] = SC_dict
+        # results_dict['PQ'] = PQ_dict
+        # SC_score = min(results_dict['SC']['score'])
+        # PQ_score = min(results_dict['PQ']['score'])
+        # O_score = math.sqrt(SC_score * PQ_score)
+        # results_dict['O'] = {'score': O_score}
 
-        if echo_output:
-            print("results_dict", results_dict)
-        if extract_all_score:
-            return [SC_score, PQ_score, O_score]
-        if extract_overall_score_only:
-            return O_score
+        # if echo_output:
+        #     print("results_dict", results_dict)
+        # if extract_all_score:
+        #     return [SC_score, PQ_score, O_score]
+        # if extract_overall_score_only:
+        #     return O_score
         return results_dict
 
 if __name__ == "__main__":
-    model = EditScore(backbone="gemini", task="t2i")
-    from datasets import load_dataset
-    dataset = load_dataset("TIGER-Lab/GenAI-Arena-Bench", "image_generation")
-    dataset = dataset["train"]
-    for idx in range(5):
-        left_image = dataset['left_image'][idx]
-        right_image = dataset['right_image'][idx]
-        prompt = dataset['prompt'][idx]
-        print(model.evaluate(left_image, prompt, extract_overall_score=True))
-        print(model.evaluate(right_image, prompt, extract_overall_score=True))
+    model = EditScore(key_path="/home/mila/x/xuolga/keys/olga_personal_metric.env")
+    model.evaluate(
+        input_image='https://chromaica.github.io/Museum/ImagenHub_Text-Guided_IE/DiffEdit/sample_34_1.jpg',
+        edit_instruction="Change the color of the zebra.",
+        ideal_edit='https://chromaica.github.io/Museum/ImagenHub_Text-Guided_IE/DiffEdit/sample_34_2.jpg',
+        new_edit='https://chromaica.github.io/Museum/ImagenHub_Text-Guided_IE/DiffEdit/sample_34_2.jpg',
+        fs_input_images=['https://chromaica.github.io/Museum/ImagenHub_Text-Guided_IE/DiffEdit/sample_34_1.jpg'],
+        fs_edit_instructions=["Change the color of the zebra."],
+        fs_ideal_edits=['https://chromaica.github.io/Museum/ImagenHub_Text-Guided_IE/DiffEdit/sample_34_1.jpg'],
+        fs_new_edits=['https://chromaica.github.io/Museum/ImagenHub_Text-Guided_IE/DiffEdit/sample_34_2.jpg'],
+        fs_suggested_scores=[2],
+        fs_reasonings=["The zebra's shape changed."],
+    )
 

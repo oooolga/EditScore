@@ -117,26 +117,52 @@ class PromptStarter(PromptItem):
 
 class PromptRule(PromptItem):
     
-    def __init__(self):
-        from .prompt_context import PC_RULES_CONTEXT
+    def __init__(self, delimiter=False):
+        if delimiter:
+            from .prompt_context import PC_RULES_CONTEXT_WITH_DELIMITER as PC_RULES_CONTEXT, START_DELIMITER, END_DELIMITER
+            PC_RULES_CONTEXT = PC_RULES_CONTEXT.format(START_DELIMITER, END_DELIMITER)
+        else:
+            from .prompt_context import PC_RULES_CONTEXT_NO_DELIMITER as PC_RULES_CONTEXT
         super().__init__(prompt_type="text",
                          content=PC_RULES_CONTEXT)
 
 class MetricPrompt(PromptList):
 
-    def __init__(self, mllm_model):
+    def __init__(self, mllm_model, delimiter=False):
         super().__init__(mllm_model)
+        self.delimiter = delimiter
         prompt_starter = PromptStarter()
-        prompt_rule = PromptRule()
+        prompt_rule = PromptRule(delimiter=self.delimiter)
         self.append(prompt_starter)
         self.append(prompt_rule)
         self.num_fs_samples = 0
         self.ready = False
+    
+    def reinitialize(self):
+        self._inner_list = list()
+        prompt_starter = PromptStarter()
+        prompt_rule = PromptRule(delimiter=self.delimiter)
+        self.append(prompt_starter)
+        self.append(prompt_rule)
+        self.num_fs_samples = 0
+        self.ready = False
+    
+    def add_fs_examples(self, input_images, edit_instructions, ideal_edits, new_edits, baseline_edits, suggested_scores, reasonings):
+        
+        for input_image, edit_instruction, ideal_edit, new_edit, baseline_edit, suggested_score, reasoning in zip(input_images, edit_instructions, ideal_edits, new_edits, baseline_edits, suggested_scores, reasonings):
+            self.add_fs_example(input_image=input_image,
+                                edit_instruction=edit_instruction,
+                                ideal_edit=ideal_edit,
+                                new_edit=new_edit,
+                                baseline_edit=baseline_edit,
+                                suggested_score=suggested_score,
+                                reasoning=reasoning)
         
     def add_fs_example(self, input_image, edit_instruction, ideal_edit, new_edit, baseline_edit, suggested_score, reasoning):
-        from .prompt_context import FS_PREFIX_CONTENT
+        
         assert not self.ready
         if self.num_fs_samples == 0:
+            from .prompt_context import FS_PREFIX_CONTENT
             self.append(PromptItem(prompt_type="text", content=FS_PREFIX_CONTENT))
         
         self.append(PromptItem(prompt_type="text", content=f"Example {self.num_fs_samples + 1}:"))

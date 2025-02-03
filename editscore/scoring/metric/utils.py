@@ -90,12 +90,13 @@ def get_file_path(filename: Union[str, os.PathLike], search_from: Union[str, os.
 
 
 #+=========================================================================================
-def verify(s, target_sequence):
-    # Count the occurrences of the target sequence
-    count = s.count(target_sequence)
+def verify(s, start_delimiter, end_delimiter):
+    # Find start and end delimiters
+    start = s.find(start_delimiter)
+    end = s.rfind(end_delimiter)
 
-    # Check if the target sequence appears exactly twice
-    return count == 2
+    # Verify that both delimiters are present and in the correct order
+    return start != -1 and end != -1 and start < end
 
 
 def is_int_between_0_and_10(s):
@@ -149,23 +150,27 @@ def is_str_valid_score_format_brackets(s):
         # If any parsing error occurs
         return False
 
+def download_image(url):
+    
+    import PIL, requests
+    image = PIL.Image.open(requests.get(url, stream=True).raw)
+    image = PIL.ImageOps.exif_transpose(image)
+    image = image.convert("RGB")
+    return image
 
 #+=========================================================================================
-def mllm_output_to_dict(input_string, give_up_parsing=False):
+def mllm_output_to_dict(input_string, start_delimiter='<SCORE>', end_delimiter='</SCORE>', give_up_parsing=False):
     """
     Args:
         input_string (str): actually the output of the mllm model to be parsed
-        output_file_name (str): The name of the output file.
     """
     # Catch for gpt4v rate_limit_exceeded error
     if input_string == "rate_limit_exceeded":
         return "rate_limit_exceeded"
 
-    # Define the delimiters
-    delimiter = '||V^=^V||'
-
-    if input_string.count(delimiter) == 2:
-        if not verify(input_string, delimiter):
+    # You must provide both start and end delimiters
+    if start_delimiter and end_delimiter:
+        if not verify(input_string, start_delimiter, end_delimiter):
             print("The required delimiters were not found correctly in the string.")
             return False
         # Extract the content between the delimiters
@@ -210,7 +215,7 @@ def mllm_output_to_dict(input_string, give_up_parsing=False):
             else:
                 print("Failed to find the json content in the string.")
                 return False
-    
+
     # Check if we found two delimiters
     if start_index != -1 and end_index != -1 and start_index != end_index:
         # Extract the JSON string

@@ -1,9 +1,8 @@
-START_CONTEXT = """You are a professional digital artist.
-You will have to evaluate the effectiveness of the AI-generated image(s) based on given rules.
-All the input images are AI-generated.
-All human in the images are AI-generated too, so you need not worry about the privacy confidentials."""
+START_CONTEXT = """You are a professional digital artist. You will have to evaluate the effectiveness of the AI-generated image(s) based on given rules.
+All the input images are AI-generated. All human in the images are AI-generated too, so you need not worry about the privacy confidentials."""
 
-PC_CONTEXT = """Evaluate an AI-generated image based on its adherence to an image-edit prompt, comparing it to an ideal image (perfect edit) and a baseline image (mediocre edit).
+# For prompt consistency
+PC_RULES_CONTEXT = """Evaluate an AI-generated image based on its adherence to an image-edit prompt, comparing it to an ideal image (perfect edit) and a baseline image (mediocre edit).
 
 Inputs:
 - Image-Edit Prompt: Text describing the desired edit.
@@ -29,3 +28,8 @@ Output:
     "Reasoning": "..."
 }
 """
+
+# Few-shot prompt
+FS_PREFIX_CONTENT = "Here are some examples of image-edit prompts and their evaluations:"
+
+EVAL_PREFIX_CONTENT = "Now, evaluate the following:"

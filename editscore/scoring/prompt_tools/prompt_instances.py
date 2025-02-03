@@ -118,9 +118,9 @@ class PromptStarter(PromptItem):
 class PromptRule(PromptItem):
     
     def __init__(self):
-        from .prompt_context import PC_CONTEXT
+        from .prompt_context import PC_RULES_CONTEXT
         super().__init__(prompt_type="text",
-                         content=PC_CONTEXT)
+                         content=PC_RULES_CONTEXT)
 
 class MetricPrompt(PromptList):
 
@@ -134,9 +134,10 @@ class MetricPrompt(PromptList):
         self.ready = False
         
     def add_fs_example(self, input_image, edit_instruction, ideal_edit, new_edit, baseline_edit, suggested_score, reasoning):
+        from .prompt_context import FS_PREFIX_CONTENT
         assert not self.ready
         if self.num_fs_samples == 0:
-            self.append(PromptItem(prompt_type="text", content="Here are some examples of image-edit prompts and their evaluations:"))
+            self.append(PromptItem(prompt_type="text", content=FS_PREFIX_CONTENT))
         
         self.append(PromptItem(prompt_type="text", content=f"Example {self.num_fs_samples + 1}:"))
         fs_sample = PromptFSSample(mllm_model=self.mllm,
@@ -152,7 +153,8 @@ class MetricPrompt(PromptList):
     
     def finalize(self, input_image, edit_instruction, ideal_edit, new_edit, baseline_edit):
         
-        self.append(PromptItem(prompt_type="text", content="Now, evaluate the following:"))
+        from .prompt_context import EVAL_PREFIX_CONTENT
+        self.append(PromptItem(prompt_type="text", content=EVAL_PREFIX_CONTENT))
         fs_sample = PromptFSSample(mllm_model=self.mllm,
                                    input_image=input_image,
                                    edit_instruction=edit_instruction,

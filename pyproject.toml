@@ -1,0 +1,27 @@
+[project]
+name = "editscore"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "accelerate>=1.0.1",
+    "datasets>=3.1.0",
+    "diffusers>=0.32.2",
+    "google>=3.0.0",
+    "google-api-python-client>=2.160.0",
+    "google-generativeai>=0.8.4",
+    "pdbpp>=0.10.3",
+    "pillow>=10.4.0",
+    "pytest>=8.3.4",
+    "safetensors>=0.5.2",
+    "torch>=2.5.1",
+    "transformers>=4.46.3",
+]
+
+[tool.poetry.group.dev.dependencies]  
+pytest = "^7.4"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

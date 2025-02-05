@@ -17,6 +17,7 @@ dependencies = [
     "safetensors>=0.5.2",
     "torch>=2.5.1",
     "transformers>=4.46.3",
+    "validators>=0.34.0",
 ]
 
 [tool.poetry.group.dev.dependencies]  
